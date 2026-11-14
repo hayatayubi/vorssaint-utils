@@ -1325,6 +1325,12 @@ enum AppManagementFeatureTests {
                "Media defaults to video compressor")
         suite.expect(registeredDefaults[DefaultsKey.mediaVideoCodec] as? String == MediaVideoCodec.h264.rawValue,
                "Media video codec defaults to H.264")
+        suite.expect(registeredDefaults[DefaultsKey.mediaVideoFormat] as? String == MediaVideoFormat.mp4.rawValue,
+               "Media video format defaults to MP4")
+        suite.expect(registeredDefaults[DefaultsKey.mediaVideoKeepOriginal] as? Bool == false,
+               "Media video conversion recompresses unless Original is chosen")
+        suite.expect(registeredDefaults[DefaultsKey.mediaVideoTrashOriginal] as? Bool == false,
+               "Media video conversion keeps the original unless told otherwise")
         suite.expect(registeredDefaults[DefaultsKey.mediaImageFormat] as? String == MediaImageFormat.jpeg.rawValue,
                "Media image format defaults to JPEG")
         suite.expect(registeredDefaults[DefaultsKey.mediaImageResizeKind] as? String == MediaImageResizeKind.maxDimension.rawValue,

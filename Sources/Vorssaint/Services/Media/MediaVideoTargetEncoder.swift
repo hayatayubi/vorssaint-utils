@@ -36,6 +36,7 @@ enum MediaVideoTargetEncoder {
                        trim: MediaTrimRange,
                        targetBytes: Int64,
                        destination: URL,
+                       fileType: AVFileType = .mp4,
                        isCancelled: () -> Bool,
                        progress: (Double) -> Void) throws -> Int64 {
         var scale = 1.0
@@ -52,6 +53,7 @@ enum MediaVideoTargetEncoder {
                         trim: trim,
                         plan: plan,
                         destination: destination,
+                        fileType: fileType,
                         isCancelled: isCancelled,
                         progress: progress)
 
@@ -72,11 +74,12 @@ enum MediaVideoTargetEncoder {
                                 trim: MediaTrimRange,
                                 plan: MediaVideoSizePlan,
                                 destination: URL,
+                                fileType: AVFileType,
                                 isCancelled: () -> Bool,
                                 progress: (Double) -> Void) throws {
         try? FileManager.default.removeItem(at: destination)
         guard let reader = try? AVAssetReader(asset: source.asset),
-              let writer = try? AVAssetWriter(outputURL: destination, fileType: .mp4)
+              let writer = try? AVAssetWriter(outputURL: destination, fileType: fileType)
         else { throw EncodeError.unsupported }
 
         let start = CMTime(seconds: trim.start, preferredTimescale: 600)

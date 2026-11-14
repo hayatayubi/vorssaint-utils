@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import AVFoundation
 import CoreGraphics
 import Darwin
 import Foundation
@@ -375,6 +376,48 @@ enum MediaVideoCodec: String, CaseIterable, Identifiable {
 
     static func sanitized(_ value: String) -> MediaVideoCodec {
         MediaVideoCodec(rawValue: value) ?? .h264
+    }
+}
+
+/// The container a converted video is written into.
+///
+/// Both containers hold the same H.264 and HEVC streams, so switching between
+/// them never changes how the picture looks, only which apps and services
+/// accept the file.
+enum MediaVideoFormat: String, CaseIterable, Identifiable {
+    case mp4, mov
+
+    var id: String { rawValue }
+
+    var fileExtension: String { rawValue }
+
+    var fileType: AVFileType {
+        switch self {
+        case .mp4: return .mp4
+        case .mov: return .mov
+        }
+    }
+
+    var contentType: UTType {
+        switch self {
+        case .mp4: return .mpeg4Movie
+        case .mov: return .quickTimeMovie
+        }
+    }
+
+    static func sanitized(_ value: String) -> MediaVideoFormat {
+        MediaVideoFormat(rawValue: value) ?? .mp4
+    }
+
+    /// The container a file already uses, judged by its extension. Anything
+    /// else (MKV, AVI and so on) has no counterpart here, so choosing either
+    /// format for it is a conversion.
+    static func container(of url: URL) -> MediaVideoFormat? {
+        switch url.pathExtension.lowercased() {
+        case "mp4", "m4v": return .mp4
+        case "mov", "qt": return .mov
+        default: return nil
+        }
     }
 }
 

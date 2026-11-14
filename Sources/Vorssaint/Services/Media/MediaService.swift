@@ -18,6 +18,12 @@ struct MediaVideoOptions: Equatable {
     var codec: MediaVideoCodec
     var sizing: MediaSizingMode = .resolution
     var targetBytes: Int64 = 0
+    var format: MediaVideoFormat = .mp4
+    /// Rewrites the same video and audio into the chosen container instead of
+    /// encoding them again, so nothing is lost and nothing is slow.
+    var keepsOriginalQuality = false
+    /// Moves the source to the Trash once the new file is safely in place.
+    var trashesOriginal = false
 }
 
 struct MediaGIFOptions: Equatable {
@@ -268,6 +274,7 @@ final class MediaService: ObservableObject {
     private func compressVideoWork(inputURL: URL, outputURL: URL, options: MediaVideoOptions,
                                    operationID: UUID, token: MediaCancellationToken) throws {
         let started = Date()
+        var originalBytes: Int64?
         let stagedOutputURL = try stagedOutput(inputURL: inputURL, outputURL: outputURL)
         defer { MediaSupport.discardStagedOutput(stagedOutputURL) }
         let asset = AVURLAsset(url: inputURL)
@@ -277,8 +284,23 @@ final class MediaService: ObservableObject {
                                               assetDuration: metadata.duration)
         guard trim.duration > 0 else { throw MediaFailureBox(.unsupported) }
 
-        switch options.sizing {
-        case .resolution:
+        if options.keepsOriginalQuality {
+            try remuxVideo(asset: asset,
+                           stagedOutputURL: stagedOutputURL,
+                           trim: trim,
+                           format: options.format,
+                           operationID: operationID,
+                           token: token)
+        } else if options.sizing == .targetSize {
+            try encodeVideoToTargetSize(asset: asset,
+                                        geometry: metadata.geometry,
+                                        stagedOutputURL: stagedOutputURL,
+                                        trim: trim,
+                                        targetBytes: options.targetBytes,
+                                        fileType: options.format.fileType,
+                                        operationID: operationID,
+                                        token: token)
+        } else {
             try convertVideo(inputURL: inputURL,
                              stagedOutputURL: stagedOutputURL,
                              trim: trim,
@@ -287,27 +309,67 @@ final class MediaService: ObservableObject {
                              started: started,
                              operationID: operationID,
                              token: token)
-        case .targetSize:
-            try encodeVideoToTargetSize(asset: asset,
-                                        geometry: metadata.geometry,
-                                        stagedOutputURL: stagedOutputURL,
-                                        trim: trim,
-                                        targetBytes: options.targetBytes,
-                                        operationID: operationID,
-                                        token: token)
         }
 
         try commit(stagedOutputURL, at: outputURL, operationID: operationID, token: token)
         MediaSupport.makeVisibleIfNeeded(outputURL)
+        if options.trashesOriginal, fileSize(outputURL) > 0,
+           !MediaSupport.fileURLsReferToSameItem(inputURL, outputURL) {
+            // Reported sizes below still compare against the original, so read
+            // it before it leaves. A failed move leaves the source in place.
+            originalBytes = fileSize(inputURL)
+            try? FileManager.default.trashItem(at: inputURL, resultingItemURL: nil)
+        }
         publish(.running(progress: 1, message: "video"), operationID: operationID)
         let result = MediaResult(tool: .videoCompressor,
                                  inputURL: inputURL,
                                  outputURL: outputURL,
-                                 originalBytes: fileSize(inputURL),
+                                 originalBytes: originalBytes ?? fileSize(inputURL),
                                  outputBytes: fileSize(outputURL),
                                  elapsed: Date().timeIntervalSince(started),
                                  text: nil)
         publish(.completed(result), operationID: operationID)
+    }
+
+    /// Copies the existing streams into another container. The session only
+    /// lists a container as supported when the codecs fit it, so a source the
+    /// target cannot hold fails here instead of producing an unplayable file.
+    private func remuxVideo(asset: AVURLAsset,
+                            stagedOutputURL: URL,
+                            trim: MediaTrimRange,
+                            format: MediaVideoFormat,
+                            operationID: UUID,
+                            token: MediaCancellationToken) throws {
+        guard let session = AVAssetExportSession(asset: asset,
+                                                 presetName: AVAssetExportPresetPassthrough),
+              session.supportedFileTypes.contains(format.fileType)
+        else { throw MediaFailureBox(.unsupported) }
+
+        try? FileManager.default.removeItem(at: stagedOutputURL)
+        session.outputURL = stagedOutputURL
+        session.outputFileType = format.fileType
+        session.shouldOptimizeForNetworkUse = true
+        session.timeRange = CMTimeRange(start: seconds(trim.start),
+                                        duration: seconds(trim.duration))
+
+        let finished = DispatchSemaphore(value: 0)
+        session.exportAsynchronously { finished.signal() }
+        var cancelRequested = false
+        while finished.wait(timeout: .now() + 0.08) == .timedOut {
+            if token.isCancelled, !cancelRequested {
+                cancelRequested = true
+                session.cancelExport()
+            }
+            publish(.running(progress: min(0.95, Double(session.progress)), message: "video"),
+                    operationID: operationID)
+        }
+        if token.isCancelled || session.status == .cancelled {
+            throw MediaFailureBox(.cancelled)
+        }
+        guard session.status == .completed else {
+            let message = session.error?.localizedDescription ?? ""
+            throw MediaFailureBox(message.isEmpty ? .unsupported : .failed(message))
+        }
     }
 
     private func convertVideo(inputURL: URL,
@@ -381,6 +443,7 @@ final class MediaService: ObservableObject {
                                          stagedOutputURL: URL,
                                          trim: MediaTrimRange,
                                          targetBytes: Int64,
+                                         fileType: AVFileType,
                                          operationID: UUID,
                                          token: MediaCancellationToken) throws {
         guard let geometry else { throw MediaFailureBox(.noVideoTrack) }
@@ -397,6 +460,7 @@ final class MediaService: ObservableObject {
                 trim: trim,
                 targetBytes: targetBytes,
                 destination: stagedOutputURL,
+                fileType: fileType,
                 isCancelled: { token.isCancelled },
                 progress: { value in
                     // The encoder reports every frame, which would put thousands

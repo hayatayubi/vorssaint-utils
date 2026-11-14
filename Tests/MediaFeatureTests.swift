@@ -153,6 +153,25 @@ enum MediaFeatureTests {
                 && MediaSupport.gifLoopCount(loops: false) == nil,
                "GIF limits are actionable and non-looping output omits repeat metadata")
 
+        // MARK: Video container
+
+        suite.expect(MediaVideoFormat.sanitized("mov") == .mov
+                && MediaVideoFormat.sanitized("mp4") == .mp4
+                && MediaVideoFormat.sanitized("nonsense") == .mp4,
+               "A stored video format falls back to the historical MP4 container")
+        suite.expect(MediaVideoFormat.mp4.fileExtension == "mp4"
+                && MediaVideoFormat.mov.fileExtension == "mov"
+                && MediaVideoFormat.mp4.fileType == .mp4
+                && MediaVideoFormat.mov.fileType == .mov
+                && MediaVideoFormat.mp4.contentType == .mpeg4Movie
+                && MediaVideoFormat.mov.contentType == .quickTimeMovie,
+               "Each video format names its own extension, writer type and content type")
+
+        suite.expect(MediaVideoFormat.container(of: URL(fileURLWithPath: "/a/clip.MOV")) == .mov
+                && MediaVideoFormat.container(of: URL(fileURLWithPath: "/a/clip.m4v")) == .mp4
+                && MediaVideoFormat.container(of: URL(fileURLWithPath: "/a/clip.mkv")) == nil,
+               "A video's current container is read from its extension and unknown ones count as a change")
+
         // MARK: Media size targets
 
         suite.expect(MediaSizingMode.sanitized("targetSize") == .targetSize

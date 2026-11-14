@@ -64,6 +64,9 @@ struct MediaWorkspaceView: View {
     @AppStorage(DefaultsKey.mediaVideoMaxDimension) private var videoMaxDimension = 1280
     @AppStorage(DefaultsKey.mediaVideoSizing) private var videoSizingRaw = MediaSizingMode.resolution.rawValue
     @AppStorage(DefaultsKey.mediaVideoTargetMegabytes) private var videoTargetMegabytes = 20
+    @AppStorage(DefaultsKey.mediaVideoFormat) private var videoFormatRaw = MediaVideoFormat.mp4.rawValue
+    @AppStorage(DefaultsKey.mediaVideoKeepOriginal) private var videoKeepOriginal = false
+    @AppStorage(DefaultsKey.mediaVideoTrashOriginal) private var videoTrashOriginal = false
 
     @AppStorage(DefaultsKey.mediaGIFStart) private var gifStart = 0.0
     @AppStorage(DefaultsKey.mediaGIFEnd) private var gifEnd = 0.0
@@ -161,6 +164,10 @@ struct MediaWorkspaceView: View {
         "{name}", "{index}", "{index:03}", "{counter}", "{date}",
         "{time}", "{datetime}", "{width}", "{height}", "{format}",
     ]
+    private var videoText: MediaVideoConverterStrings {
+        MediaVideoConverterStrings.localized(l10n.language)
+    }
+
     private var imageText: MediaImageConverterStrings {
         MediaImageConverterStrings.localized(l10n.language)
     }
@@ -229,6 +236,12 @@ struct MediaWorkspaceView: View {
             }
             outputURL = defaultOutputURL(for: inputURLs, tool: .imageCompressor)
         }
+        .onChange(of: videoFormatRaw) { _, _ in refreshVideoOutput(formatChanged: true) }
+        .onChange(of: videoKeepOriginal) { _, keepsOriginal in
+            if keepsOriginal { avoidPointlessOriginalFormat() }
+            refreshVideoOutput(formatChanged: false)
+        }
+        .onChange(of: videoSizingRaw) { _, _ in refreshVideoOutput(formatChanged: false) }
         .onDisappear {
             mediaDefaultsTask?.cancel()
             workspace.durationLoading.cancel()
@@ -394,6 +407,11 @@ struct MediaWorkspaceView: View {
                     .toggleStyle(.checkbox)
                     .disabled(isRunning)
             }
+            if selectedTool == .videoCompressor, !inputURLs.isEmpty {
+                Toggle(videoText.trashOriginal, isOn: $videoTrashOriginal)
+                    .toggleStyle(.checkbox)
+                    .disabled(isRunning)
+            }
         }
         .panelCard()
     }
@@ -404,10 +422,26 @@ struct MediaWorkspaceView: View {
         case .videoCompressor:
             VStack(alignment: .leading, spacing: 10) {
                 timeRangeRow(start: $videoStart, end: $videoEnd)
+                HStack(spacing: 10) {
+                    Text(l10n.s.mediaFormat)
+                        .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                    Picker("", selection: $videoFormatRaw) {
+                        ForEach(MediaVideoFormat.allCases) { format in
+                            Text(format.fileExtension.uppercased()).tag(format.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(isRunning)
+                    Spacer(minLength: 0)
+                }
                 sizingPicker(selection: $videoSizingRaw)
                 if videoSizing == .resolution {
-                    compressionRow(value: $videoQuality)
-                    stepperInt(l10n.s.mediaMaxSize, value: $videoMaxDimension, range: 640...3840, step: 320, suffix: "px")
+                    compressionRow(value: $videoQuality, keepsOriginal: $videoKeepOriginal)
+                    if !videoKeepOriginal {
+                        stepperInt(l10n.s.mediaMaxSize, value: $videoMaxDimension, range: 640...3840, step: 320, suffix: "px")
+                    }
                 } else {
                     targetSizeRow(value: $videoTargetMegabytes)
                 }
@@ -964,6 +998,31 @@ struct MediaWorkspaceView: View {
         MediaSizingMode.sanitized(videoSizingRaw)
     }
 
+    /// Original only rewrites the container, so a file already in the chosen
+    /// one would come back identical. Start from the other container instead.
+    private func avoidPointlessOriginalFormat() {
+        guard videoKeepOriginal, videoSizing == .resolution, let inputURL,
+              MediaVideoFormat.container(of: inputURL) == videoFormat else { return }
+        videoFormatRaw = (videoFormat == .mp4 ? MediaVideoFormat.mov : .mp4).rawValue
+    }
+
+    private func refreshVideoOutput(formatChanged: Bool) {
+        guard selectedTool == .videoCompressor, !inputURLs.isEmpty else { return }
+        if outputWasChosenManually {
+            if formatChanged, let outputURL {
+                self.outputURL = MediaSupport.outputURLByReplacingExtension(
+                    outputURL,
+                    fileExtension: videoFormat.fileExtension)
+            }
+            return
+        }
+        outputURL = defaultOutputURL(for: inputURLs, tool: .videoCompressor)
+    }
+
+    private var videoFormat: MediaVideoFormat {
+        MediaVideoFormat.sanitized(videoFormatRaw)
+    }
+
     private var gifSizing: MediaSizingMode {
         MediaSizingMode.sanitized(gifSizingRaw)
     }
@@ -989,31 +1048,72 @@ struct MediaWorkspaceView: View {
         }
     }
 
-    private func compressionRow(value: Binding<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    /// `keepsOriginal` adds a fourth choice that skips compression entirely.
+    /// Only the video tool passes it, because only a video can change container
+    /// without being encoded again.
+    private func compressionRow(value: Binding<Double>, keepsOriginal: Binding<Bool>? = nil) -> some View {
+        let original = keepsOriginal?.wrappedValue ?? false
+        return VStack(alignment: .leading, spacing: 5) {
             Text(l10n.s.mediaQuality)
                 .font(.system(size: compact ? 10 : 11, weight: .semibold))
             HStack(spacing: 6) {
                 ForEach(MediaCompressionLevel.allCases) { level in
-                    compressionButton(level, value: value)
+                    compressionButton(level, value: value, keepsOriginal: keepsOriginal)
+                }
+                if let keepsOriginal {
+                    originalQualityButton(keepsOriginal)
                 }
             }
-            Text(compressionDescription(for: MediaCompressionLevel.nearest(to: value.wrappedValue)))
+            Text(original
+                 ? videoText.originalDescription
+                 : compressionDescription(for: MediaCompressionLevel.nearest(to: value.wrappedValue)))
                 .font(.system(size: compact ? 9.5 : 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func compressionButton(_ level: MediaCompressionLevel, value: Binding<Double>) -> some View {
+    private func compressionButton(_ level: MediaCompressionLevel,
+                                   value: Binding<Double>,
+                                   keepsOriginal: Binding<Bool>? = nil) -> some View {
         let selected = MediaCompressionLevel.nearest(to: value.wrappedValue) == level
+            && keepsOriginal?.wrappedValue != true
         return Button {
             value.wrappedValue = level.quality
+            keepsOriginal?.wrappedValue = false
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: level.symbolName)
                     .font(.system(size: compact ? 10 : 11, weight: .semibold))
                 Text(compressionTitle(for: level))
+                    .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: compact ? 28 : 32)
+            .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.78))
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.16) : PanelSurface.controlFill(for: colorScheme))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(selected ? Color.accentColor.opacity(0.45) : PanelSurface.border(for: colorScheme),
+                                  lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func originalQualityButton(_ selection: Binding<Bool>) -> some View {
+        let selected = selection.wrappedValue
+        return Button {
+            selection.wrappedValue = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                Text(videoText.original)
                     .font(.system(size: compact ? 10 : 11, weight: .semibold))
                     .lineLimit(1)
             }
@@ -1243,7 +1343,12 @@ struct MediaWorkspaceView: View {
 
     private var actionTitle: String {
         switch selectedTool {
-        case .videoCompressor: return l10n.s.mediaStartVideo
+        case .videoCompressor:
+            // The button names what will actually happen to the file.
+            let recompresses = !(videoKeepOriginal && videoSizing == .resolution)
+            let changesContainer = inputURL.map { MediaVideoFormat.container(of: $0) != videoFormat } ?? false
+            if !recompresses { return videoText.convertAction }
+            return changesContainer ? videoText.compressAndConvertAction : l10n.s.mediaStartVideo
         case .gifMaker: return l10n.s.mediaStartGIF
         case .imageCompressor:
             // Choosing PDF changes the file's kind, so the button says what
@@ -1439,7 +1544,11 @@ struct MediaWorkspaceView: View {
             workspace.durationLoading.reset()
             // Zero means the full recording until its actual duration arrives.
             // Never leave a previous input's saved trim on a newly chosen file.
-            if tool == .videoCompressor { videoStart = 0; videoEnd = 0 }
+            if tool == .videoCompressor {
+                videoStart = 0
+                videoEnd = 0
+                avoidPointlessOriginalFormat()
+            }
             else if tool == .gifMaker { gifStart = 0; gifEnd = 0 }
         }
         guard AppFeature.mediaTools.isAvailable,
@@ -1535,6 +1644,12 @@ struct MediaWorkspaceView: View {
         localMessage = nil
         switch selectedTool {
         case .videoCompressor:
+            if videoKeepOriginal, videoSizing == .resolution,
+               MediaVideoFormat.container(of: inputURL) == videoFormat {
+                localMessage = String(format: videoText.alreadyInFormatFormat,
+                                      videoFormat.fileExtension.uppercased())
+                return
+            }
             media.compressVideo(inputURL: inputURL, outputURL: outputURL,
                                 options: MediaVideoOptions(start: videoStart,
                                                            end: videoEnd,
@@ -1545,7 +1660,11 @@ struct MediaWorkspaceView: View {
                                                            codec: .h264,
                                                            sizing: videoSizing,
                                                            targetBytes: MediaSupport.targetBytes(
-                                                               megabytes: videoTargetMegabytes)))
+                                                               megabytes: videoTargetMegabytes),
+                                                           format: videoFormat,
+                                                           keepsOriginalQuality: videoKeepOriginal
+                                                               && videoSizing == .resolution,
+                                                           trashesOriginal: videoTrashOriginal))
         case .gifMaker:
             media.makeGIF(inputURL: inputURL, outputURL: outputURL,
                           options: MediaGIFOptions(start: gifStart,
@@ -1590,7 +1709,7 @@ struct MediaWorkspaceView: View {
 
     private var outputType: UTType {
         switch selectedTool {
-        case .videoCompressor: return .mpeg4Movie
+        case .videoCompressor: return videoFormat.contentType
         case .gifMaker: return .gif
         case .imageCompressor:
             switch MediaImageFormat.sanitized(imageFormatRaw) {
@@ -1607,7 +1726,10 @@ struct MediaWorkspaceView: View {
         guard let inputURL = inputURLs.first else { return nil }
         switch tool {
         case .videoCompressor:
-            return MediaSupport.uniqueOutputURL(for: inputURL, suffix: "-compressed", fileExtension: "mp4")
+            let keepsOriginal = videoKeepOriginal && videoSizing == .resolution
+            return MediaSupport.uniqueOutputURL(for: inputURL,
+                                                suffix: keepsOriginal ? "-converted" : "-compressed",
+                                                fileExtension: videoFormat.fileExtension)
         case .gifMaker:
             return MediaSupport.uniqueOutputURL(for: inputURL, suffix: "", fileExtension: "gif")
         case .imageCompressor:
