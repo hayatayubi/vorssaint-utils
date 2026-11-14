@@ -172,6 +172,50 @@ enum MediaFeatureTests {
                 && MediaVideoFormat.container(of: URL(fileURLWithPath: "/a/clip.mkv")) == nil,
                "A video's current container is read from its extension and unknown ones count as a change")
 
+        let mov = URL(fileURLWithPath: "/a/clip.mov")
+        let mp4 = URL(fileURLWithPath: "/a/clip.mp4")
+        let mkv = URL(fileURLWithPath: "/a/clip.mkv")
+        func action(_ original: Bool, _ sizing: MediaSizingMode, _ source: URL?,
+                    _ format: MediaVideoFormat) -> MediaVideoAction {
+            MediaVideoAction.resolve(keepsOriginal: original, sizing: sizing, source: source, format: format)
+        }
+        suite.expect(action(true, .resolution, mov, .mp4) == .convert
+                && action(true, .resolution, nil, .mp4) == .convert,
+               "Original names the run as a plain conversion")
+        suite.expect(action(false, .resolution, mov, .mov) == .compress
+                && action(false, .targetSize, mp4, .mp4) == .compress
+                && action(false, .resolution, nil, .mp4) == .compress,
+               "Staying in the same container, or with no file yet, is only a compression")
+        suite.expect(action(false, .resolution, mov, .mp4) == .compressAndConvert
+                && action(false, .targetSize, mp4, .mov) == .compressAndConvert
+                && action(false, .resolution, mkv, .mp4) == .compressAndConvert,
+               "A different or unknown source container makes it both")
+        suite.expect(action(true, .targetSize, mov, .mp4) == .compressAndConvert
+                && action(true, .targetSize, mov, .mov) == .compress,
+               "Original does nothing for a target file size, which always encodes")
+        suite.expect(MediaVideoAction.isRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                      source: mov, format: .mov)
+                && !MediaVideoAction.isRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                     source: mov, format: .mp4)
+                && !MediaVideoAction.isRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                     source: mkv, format: .mp4)
+                && !MediaVideoAction.isRedundantSwap(keepsOriginal: false, sizing: .resolution,
+                                                     source: mov, format: .mov)
+                && !MediaVideoAction.isRedundantSwap(keepsOriginal: true, sizing: .targetSize,
+                                                     source: mov, format: .mov)
+                && !MediaVideoAction.isRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                     source: nil, format: .mov),
+               "Only an Original swap into the file's own container is refused, never a legitimate conversion")
+        suite.expect(MediaVideoAction.formatAvoidingRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                                  source: mov, format: .mov) == .mp4
+                && MediaVideoAction.formatAvoidingRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                                source: mp4, format: .mp4) == .mov
+                && MediaVideoAction.formatAvoidingRedundantSwap(keepsOriginal: false, sizing: .resolution,
+                                                                source: mov, format: .mov) == .mov
+                && MediaVideoAction.formatAvoidingRedundantSwap(keepsOriginal: true, sizing: .resolution,
+                                                                source: mov, format: .mp4) == .mp4,
+               "The format only flips when Original would otherwise have nothing to change")
+
         // MARK: Media size targets
 
         suite.expect(MediaSizingMode.sanitized("targetSize") == .targetSize

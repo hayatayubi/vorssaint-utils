@@ -1001,9 +1001,9 @@ struct MediaWorkspaceView: View {
     /// Original only rewrites the container, so a file already in the chosen
     /// one would come back identical. Start from the other container instead.
     private func avoidPointlessOriginalFormat() {
-        guard videoKeepOriginal, videoSizing == .resolution, let inputURL,
-              MediaVideoFormat.container(of: inputURL) == videoFormat else { return }
-        videoFormatRaw = (videoFormat == .mp4 ? MediaVideoFormat.mov : .mp4).rawValue
+        let format = MediaVideoAction.formatAvoidingRedundantSwap(
+            keepsOriginal: videoKeepOriginal, sizing: videoSizing, source: inputURL, format: videoFormat)
+        if format != videoFormat { videoFormatRaw = format.rawValue }
     }
 
     private func refreshVideoOutput(formatChanged: Bool) {
@@ -1345,10 +1345,12 @@ struct MediaWorkspaceView: View {
         switch selectedTool {
         case .videoCompressor:
             // The button names what will actually happen to the file.
-            let recompresses = !(videoKeepOriginal && videoSizing == .resolution)
-            let changesContainer = inputURL.map { MediaVideoFormat.container(of: $0) != videoFormat } ?? false
-            if !recompresses { return videoText.convertAction }
-            return changesContainer ? videoText.compressAndConvertAction : l10n.s.mediaStartVideo
+            switch MediaVideoAction.resolve(keepsOriginal: videoKeepOriginal, sizing: videoSizing,
+                                            source: inputURL, format: videoFormat) {
+            case .convert: return videoText.convertAction
+            case .compressAndConvert: return videoText.compressAndConvertAction
+            case .compress: return l10n.s.mediaStartVideo
+            }
         case .gifMaker: return l10n.s.mediaStartGIF
         case .imageCompressor:
             // Choosing PDF changes the file's kind, so the button says what
@@ -1644,8 +1646,8 @@ struct MediaWorkspaceView: View {
         localMessage = nil
         switch selectedTool {
         case .videoCompressor:
-            if videoKeepOriginal, videoSizing == .resolution,
-               MediaVideoFormat.container(of: inputURL) == videoFormat {
+            if MediaVideoAction.isRedundantSwap(keepsOriginal: videoKeepOriginal, sizing: videoSizing,
+                                                source: inputURL, format: videoFormat) {
                 localMessage = String(format: videoText.alreadyInFormatFormat,
                                       videoFormat.fileExtension.uppercased())
                 return

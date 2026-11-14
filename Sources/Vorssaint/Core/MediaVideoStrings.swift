@@ -56,7 +56,7 @@ extension MediaVideoConverterStrings {
         convertAction: "Videoyu dönüştür",
         compressAndConvertAction: "Sıkıştır ve dönüştür",
         alreadyInFormatFormat: "Zaten %@ biçiminde. Diğer biçimi veya bir sıkıştırma düzeyini seçin.",
-        trashOriginal: "İşlem bitince orijinali Çöp Sepeti'ne taşı")
+        trashOriginal: "İşlem bitince orijinali Çöp Sepeti’ne taşı")
 
     static let ru = MediaVideoConverterStrings(
         original: "Оригинал",
@@ -95,16 +95,16 @@ extension MediaVideoConverterStrings {
         originalDescription: "Change uniquement le conteneur. Rapide et sans perte de qualité.",
         convertAction: "Convertir la vidéo",
         compressAndConvertAction: "Compresser et convertir",
-        alreadyInFormatFormat: "Déjà au format %@. Choisissez l'autre format ou un niveau de compression.",
-        trashOriginal: "Placer l'original dans la Corbeille à la fin")
+        alreadyInFormatFormat: "Déjà au format %@. Choisissez l’autre format ou un niveau de compression.",
+        trashOriginal: "Placer l’original dans la Corbeille à la fin")
 
     static let it = MediaVideoConverterStrings(
         original: "Originale",
         originalDescription: "Cambia solo il contenitore. Veloce e senza perdita di qualità.",
         convertAction: "Converti video",
         compressAndConvertAction: "Comprimi e converti",
-        alreadyInFormatFormat: "Già in formato %@. Scegli l'altro formato o un livello di compressione.",
-        trashOriginal: "Sposta l'originale nel Cestino al termine")
+        alreadyInFormatFormat: "Già in formato %@. Scegli l’altro formato o un livello di compressione.",
+        trashOriginal: "Sposta l’originale nel Cestino al termine")
 
     static let ja = MediaVideoConverterStrings(
         original: "オリジナル",

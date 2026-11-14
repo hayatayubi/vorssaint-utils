@@ -421,6 +421,42 @@ enum MediaVideoFormat: String, CaseIterable, Identifiable {
     }
 }
 
+/// What running the video tool will do to a file, from the person's choices.
+///
+/// Original only exists for resolution sizing: a target file size has to be
+/// reached by encoding, so it can never be a plain container swap.
+enum MediaVideoAction: Equatable {
+    case convert, compress, compressAndConvert
+
+    private static func swapsContainerOnly(keepsOriginal: Bool, sizing: MediaSizingMode) -> Bool {
+        keepsOriginal && sizing == .resolution
+    }
+
+    static func resolve(keepsOriginal: Bool, sizing: MediaSizingMode,
+                        source: URL?, format: MediaVideoFormat) -> MediaVideoAction {
+        if swapsContainerOnly(keepsOriginal: keepsOriginal, sizing: sizing) { return .convert }
+        let changesContainer = source.map { MediaVideoFormat.container(of: $0) != format } ?? false
+        return changesContainer ? .compressAndConvert : .compress
+    }
+
+    /// A container swap into the container the file already has would only
+    /// write a copy, so it is refused instead of run.
+    static func isRedundantSwap(keepsOriginal: Bool, sizing: MediaSizingMode,
+                                source: URL?, format: MediaVideoFormat) -> Bool {
+        guard swapsContainerOnly(keepsOriginal: keepsOriginal, sizing: sizing),
+              let source else { return false }
+        return MediaVideoFormat.container(of: source) == format
+    }
+
+    /// The format to start from so that Original has something to change.
+    static func formatAvoidingRedundantSwap(keepsOriginal: Bool, sizing: MediaSizingMode,
+                                            source: URL?, format: MediaVideoFormat) -> MediaVideoFormat {
+        guard isRedundantSwap(keepsOriginal: keepsOriginal, sizing: sizing,
+                              source: source, format: format) else { return format }
+        return format == .mp4 ? .mov : .mp4
+    }
+}
+
 struct MediaTrimRange: Equatable {
     let start: Double
     let end: Double
